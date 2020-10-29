@@ -170,9 +170,13 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
     def reset(self):
         logger.debug("reseting")
+        self.send_control(0, 0, 1.0)
         self.send_reset_car()
         self.timer.reset()
+        for _ in range(3):
+            self.send_reset_car()
         time.sleep(1)
+        self.send_control(0, 0, 1.0)
         self.image_array = np.zeros(self.camera_img_size)
         self.last_obs = self.image_array
         self.hit = "none"
@@ -184,13 +188,14 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.over = False
         self.missed_checkpoint = False
         self.dq = False
+        self.persistent_done = False
 
 
     def get_sensor_size(self):
         return self.camera_img_size
 
     def take_action(self, action):
-        self.send_control(action[0], action[1])
+        self.send_control(action[0], action[1], float(action[2] > 0.5))
 
     def observe(self):
         while self.last_obs is self.image_array:
@@ -198,7 +203,8 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         self.last_obs = self.image_array
         observation = self.image_array
-        done = self.is_game_over()
+        done = self.is_game_over() | self.persistent_done
+        self.persistent_done |= done
         reward = self.calc_reward(done)
         info = {'pos': (self.x, self.y, self.z), 'cte': self.cte,
                 "speed": self.speed, "hit": self.hit}
@@ -329,11 +335,11 @@ class DonkeyUnitySimHandler(IMesgHandler):
             else:
                 raise ValueError(f"Scene name {self.SceneToLoad} not in scene list {names}")
 
-    def send_control(self, steer, throttle):
+    def send_control(self, steer, throttle,brake=0.):
         if not self.loaded:
             return
         msg = {'msg_type': 'control', 'steering': steer.__str__(
-        ), 'throttle': throttle.__str__(), 'brake': '0.0'}
+        ), 'throttle': throttle.__str__(), 'brake': brake.__str__()}
         self.queue_message(msg)
 
     def send_reset_car(self):

@@ -7,7 +7,6 @@ import os
 import pytest
 
 import gym
-import gym_donkeycar.envs
 
 env_list = [
     "donkey-warehouse-v0",
@@ -20,7 +19,7 @@ env_list = [
 def test_load_gyms(mocker):
     sim_ctl = mocker.patch('gym_donkeycar.envs.donkey_env.DonkeyUnitySimContoller')
     unity_proc = mocker.patch('gym_donkeycar.envs.donkey_env.DonkeyUnityProcess')
-    conf = { "exe_path" : "remote", 
+    conf = { "exe_path" : "remote",
         "host" : "127.0.0.1",
         "port" : 9091 }
 
