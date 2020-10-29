@@ -12,8 +12,8 @@ import numpy as np
 import gym
 from gym import spaces
 from gym.utils import seeding
-from gym_donkeycar.envs.donkey_sim import DonkeyUnitySimContoller
-from gym_donkeycar.envs.donkey_proc import DonkeyUnityProcess
+from .donkey_sim import DonkeyUnitySimContoller
+from .donkey_proc import DonkeyUnityProcess
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,7 @@ class DonkeyEnv(gym.Env):
         conf["level"] = level
 
         # ensure defaults are supplied if missing.
-        supply_defaults(conf)        
+        supply_defaults(conf)
 
         # set logging level
         logging.basicConfig(level=conf["log_level"])

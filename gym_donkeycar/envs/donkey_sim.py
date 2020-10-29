@@ -15,10 +15,10 @@ import types
 import numpy as np
 from PIL import Image
 
-from gym_donkeycar.core.fps import FPSTimer
-from gym_donkeycar.core.message import IMesgHandler
-from gym_donkeycar.core.sim_client import SimClient
-from gym_donkeycar.envs.donkey_ex import SimFailed
+from ..core.fps import FPSTimer
+from ..core.message import IMesgHandler
+from ..core.sim_client import SimClient
+from ..envs.donkey_ex import SimFailed
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         if self.hit != "none":
             return -2.0
-        
+
         # going fast close to the center of lane yeilds best reward
         return (1.0 - (math.fabs(self.cte) / self.max_cte)) * self.speed
 
@@ -262,7 +262,7 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         self.determine_episode_over()
 
-    def on_cross_start(self, data):        
+    def on_cross_start(self, data):
         logger.info(f"crossed start line: lap_time {data['lap_time']}")
 
     def on_race_start(self, data):
