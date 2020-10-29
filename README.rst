@@ -28,7 +28,7 @@ Installation
 Example Usage
 --------------
 
-A short and compact introduction for people who know gym environments, but want to understand this one. 
+A short and compact introduction for people who know gym environments, but want to understand this one.
 Simple example code:
 
 .. code-block:: python
@@ -40,9 +40,9 @@ Simple example code:
 
     #%% SET UP ENVIRONMENT
     exe_path = f"{PATH_TO_APP}/donkey_sim.exe"
-    port = 9091    
-    
-    conf = { "exe_path" : exe_path, "port" : port }
+    port = 9091
+
+    conf = { "exe_path" : exe_path, "port" : port,"host":"localhost" }
 
     env = gym.make("donkey-generated-track-v0", conf=conf)
 
