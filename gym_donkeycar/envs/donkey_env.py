@@ -29,7 +29,6 @@ def supply_defaults(conf):
             conf[key] = val
             print("setting default: %s %s" % (key, val.__str__()))
 
-
 class DonkeyEnv(gym.Env):
     """
     OpenAI Gym Environment for Donkey
@@ -48,11 +47,13 @@ class DonkeyEnv(gym.Env):
     BRAKE_MAX = 1.0
     VAL_PER_PIXEL = 255
 
-    def __init__(self, level, conf):
+    def __init__(self, level, conf:dict):
         print("starting DonkeyGym env")
         self.viewer = None
         self.proc = None
         conf["level"] = level
+
+
 
         # ensure defaults are supplied if missing.
         supply_defaults(conf)
@@ -91,7 +92,8 @@ class DonkeyEnv(gym.Env):
         self.frame_skip = conf["frame_skip"]
 
         # wait until loaded
-        self.viewer.wait_until_loaded()
+        if conf.get("launch",True):
+            self.viewer.wait_until_loaded()
 
 
     def __del__(self):

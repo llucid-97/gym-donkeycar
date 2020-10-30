@@ -22,11 +22,9 @@ from ..envs.donkey_ex import SimFailed
 
 logger = logging.getLogger(__name__)
 
-
 class DonkeyUnitySimContoller():
 
     def __init__(self, conf):
-
         logger.setLevel(conf["log_level"])
 
         self.address = (conf["host"], conf["port"])
@@ -88,9 +86,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.loaded = False
         self.max_cte = conf["max_cte"]
         self.timer = FPSTimer()
+        self.cte_offset = conf.get("cte_offset",0.)
 
         # sensor size - height, width, depth
         self.camera_img_size = conf["cam_resolution"]
+        from collections import deque
+        self.cte_history = deque(maxlen=20)
         self.image_array = np.zeros(self.camera_img_size)
         self.last_obs = None
         self.hit = "none"
@@ -142,17 +143,18 @@ class DonkeyUnitySimHandler(IMesgHandler):
         logger.info("sending car config.")
         self.set_car_config(conf)
         # self.set_racer_bio(conf)
-        cam_config = self.extract_keys(conf, ["img_w", "img_h", "img_d", "img_enc", "fov", "fish_eye_x", "fish_eye_y", "offset_x", "offset_y", "offset_z", "rot_x"])
+        cam_config = self.extract_keys(conf, ["img_w", "img_h", "img_d", "img_enc", "fov", "fish_eye_x", "fish_eye_y",
+                                              "offset_x", "offset_y", "offset_z", "rot_x"])
         self.send_cam_config(**cam_config)
         logger.info("done sending car config.")
 
     def set_car_config(self, conf):
-        if "body_style" in conf :
+        if "body_style" in conf:
             self.send_car_config(conf["body_style"], conf["body_rgb"], conf["car_name"], conf["font_size"])
 
     def set_racer_bio(self, conf):
         self.conf = conf
-        if "bio" in conf :
+        if "bio" in conf:
             self.send_racer_bio(conf["racer_name"], conf["car_name"], conf["bio"], conf["country"], conf["guid"])
 
     def on_recv_message(self, message):
@@ -170,13 +172,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
     def reset(self):
         logger.debug("reseting")
-        self.send_control(0, 0, 1.0)
-        self.send_reset_car()
-        self.timer.reset()
-        for _ in range(3):
+        for _ in range(10):
+            self.send_control(0, 0, 1.0)
             self.send_reset_car()
+
+        self.timer.reset()
         time.sleep(1)
-        self.send_control(0, 0, 1.0)
         self.image_array = np.zeros(self.camera_img_size)
         self.last_obs = self.image_array
         self.hit = "none"
@@ -190,7 +191,6 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.dq = False
         self.persistent_done = False
 
-
     def get_sensor_size(self):
         return self.camera_img_size
 
@@ -203,15 +203,14 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         self.last_obs = self.image_array
         observation = self.image_array
-        done = self.is_game_over() | self.persistent_done
-        self.persistent_done |= done
-        reward = self.calc_reward(done)
+        self.persistent_done |= self.is_game_over()
+        reward = self.calc_reward(self.persistent_done,self.speed,self.cte)
         info = {'pos': (self.x, self.y, self.z), 'cte': self.cte,
                 "speed": self.speed, "hit": self.hit}
 
-        #self.timer.on_frame()
+        # self.timer.on_frame()
 
-        return observation, reward, done, info
+        return observation, reward, self.persistent_done, info
 
     def is_game_over(self):
         return self.over
@@ -225,19 +224,17 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.calc_reward = types.MethodType(reward_fn, self)
         logger.debug("custom reward fn set.")
 
-    def calc_reward(self, done):
-        if done:
-            return -1.0
+    def calc_reward(self, done, speed, cte):
+        # penalize the agent for getting off the road fast
+        if done: return -speed
 
-        if self.cte > self.max_cte:
-            return -1.0
+        reward = (
+            (speed ** 0.5)
+            * np.exp(-np.abs(cte))  # stay close to lane center
+        )
 
-        if self.hit != "none":
-            return -2.0
-
-        # going fast close to the center of lane yeilds best reward
-        return (1.0 - (math.fabs(self.cte) / self.max_cte)) * self.speed
-
+        if (reward < 1e-4) or (np.isnan(reward)): return 0
+        return reward
 
     ## ------ Socket interface ----------- ##
 
@@ -248,7 +245,6 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         # always update the image_array as the observation loop will hang if not changing.
         self.image_array = np.asarray(image)
-
         self.x = data["pos_x"]
         self.y = data["pos_y"]
         self.z = data["pos_z"]
@@ -258,7 +254,8 @@ class DonkeyUnitySimHandler(IMesgHandler):
         # Will be missing if path is not setup in the given scene.
         # It should be setup in the 4 scenes available now.
         if "cte" in data:
-            self.cte = data["cte"]
+            self.cte = data["cte"] + self.cte_offset
+            self.cte_history.append(math.fabs(data["cte"]))
 
         # don't update hit once session over
         if self.over:
@@ -298,14 +295,16 @@ class DonkeyUnitySimHandler(IMesgHandler):
         self.determine_episode_over = types.MethodType(ep_over_fn, self)
         logger.debug("custom ep_over fn set.")
 
-    def determine_episode_over(self):
+    def determine_episode_over(self,):
+
         # we have a few initial frames on start that are sometimes very large CTE when it's behind
         # the path just slightly. We ignore those.
-        if math.fabs(self.cte) > 2 * self.max_cte:
-            pass
-        elif math.fabs(self.cte) > self.max_cte:
-            logger.debug(f"game over: cte {self.cte}")
-            self.over = True
+        cte = max(self.cte_history)
+        if math.fabs(cte) > self.max_cte:
+            print(f"game over: cte {cte}")
+            if (len(self.cte_history) == self.cte_history.maxlen):
+                logger.debug(f"game over: cte {cte}")
+                self.over = True
         elif self.hit != "none":
             logger.debug(f"game over: hit {self.hit}")
             self.over = True
@@ -335,7 +334,7 @@ class DonkeyUnitySimHandler(IMesgHandler):
             else:
                 raise ValueError(f"Scene name {self.SceneToLoad} not in scene list {names}")
 
-    def send_control(self, steer, throttle,brake=0.):
+    def send_control(self, steer, throttle, brake=0.):
         if not self.loaded:
             return
         msg = {'msg_type': 'control', 'steering': steer.__str__(
@@ -365,12 +364,12 @@ class DonkeyUnitySimHandler(IMesgHandler):
         # car_name = "string less than 64 char"
         """
         msg = {'msg_type': 'car_config',
-            'body_style': body_style,
-            'body_r' : body_rgb[0].__str__(),
-            'body_g' : body_rgb[1].__str__(),
-            'body_b' : body_rgb[2].__str__(),
-            'car_name': car_name,
-            'font_size' : font_size.__str__() }
+               'body_style': body_style,
+               'body_r': body_rgb[0].__str__(),
+               'body_g': body_rgb[1].__str__(),
+               'body_b': body_rgb[2].__str__(),
+               'car_name': car_name,
+               'font_size': font_size.__str__()}
         self.blocking_send(msg)
         time.sleep(0.1)
 
@@ -380,15 +379,16 @@ class DonkeyUnitySimHandler(IMesgHandler):
         # car_name = "string less than 64 char"
         # guid = "some random string"
         msg = {'msg_type': 'racer_info',
-            'racer_name': racer_name,
-            'car_name' : car_name,
-            'bio' : bio,
-            'country' : country,
-            'guid' : guid }
+               'racer_name': racer_name,
+               'car_name': car_name,
+               'bio': bio,
+               'country': country,
+               'guid': guid}
         self.blocking_send(msg)
         time.sleep(0.1)
 
-    def send_cam_config(self, img_w=0, img_h=0, img_d=0, img_enc=0, fov=0, fish_eye_x=0, fish_eye_y=0, offset_x=0, offset_y=0, offset_z=0, rot_x=0):
+    def send_cam_config(self, img_w=0, img_h=0, img_d=0, img_enc=0, fov=0, fish_eye_x=0, fish_eye_y=0, offset_x=0,
+                        offset_y=0, offset_z=0, rot_x=0):
         """ Camera config
             set any field to Zero to get the default camera setting.
             offset_x moves camera left/right
@@ -398,18 +398,18 @@ class DonkeyUnitySimHandler(IMesgHandler):
             with fish_eye_x/y == 0.0 then you get no distortion
             img_enc can be one of JPG|PNG|TGA
         """
-        msg = {"msg_type" : "cam_config",
-               "fov" : str(fov),
-               "fish_eye_x" : str(fish_eye_x),
-               "fish_eye_y" : str(fish_eye_y),
-               "img_w" : str(img_w),
-               "img_h" : str(img_h),
-               "img_d" : str(img_d),
-               "img_enc" : str(img_enc),
-               "offset_x" : str(offset_x),
-               "offset_y" : str(offset_y),
-               "offset_z" : str(offset_z),
-               "rot_x" : str(rot_x) }
+        msg = {"msg_type": "cam_config",
+               "fov": str(fov),
+               "fish_eye_x": str(fish_eye_x),
+               "fish_eye_y": str(fish_eye_y),
+               "img_w": str(img_w),
+               "img_h": str(img_h),
+               "img_d": str(img_d),
+               "img_enc": str(img_enc),
+               "offset_x": str(offset_x),
+               "offset_y": str(offset_y),
+               "offset_z": str(offset_z),
+               "rot_x": str(rot_x)}
         self.blocking_send(msg)
         time.sleep(0.1)
 
