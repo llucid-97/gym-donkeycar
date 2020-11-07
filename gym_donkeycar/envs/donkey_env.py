@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 def supply_defaults(conf):
     defaults = [("start_delay", 5.0),
-                ("max_cte", 5.0),
+                ("max_cte", 6.0),
                 ("frame_skip", 2),
                 ("cam_resolution", (120,160,3)),
                 ("log_level", logging.INFO)]

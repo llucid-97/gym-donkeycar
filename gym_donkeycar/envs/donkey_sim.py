@@ -230,7 +230,7 @@ class DonkeyUnitySimHandler(IMesgHandler):
 
         reward = (
             (speed ** 0.5)
-            * np.exp(-np.abs(cte))  # stay close to lane center
+            * np.exp(-np.power(cte,2))  # stay close to lane center
         )
 
         if (reward < 1e-4) or (np.isnan(reward)): return 0
